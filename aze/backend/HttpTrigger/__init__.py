@@ -14,15 +14,16 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         try:
             req_body = req.get_body().decode("utf-8")
             request_data = json.loads(req_body)
+            print(request_data)
 
-            embeddings = generate_embeddings_by_files(request_data)
+            embeddings, content = generate_embeddings_by_files(request_data)
 
             response_data = {
                 "message": "Embeddings generated successfully",
-                "data": embeddings,
+                "embeddings": embeddings,
                 "name": request_data,
+                "content": content,
             }
-            print(request_data)
             return func.HttpResponse(json.dumps(response_data), status_code=200)
         except Exception as e:
             print(str(e))
@@ -30,20 +31,23 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     elif req.method == "POST" and route == "upload":
         try:
             req_body = req.get_body().decode("utf-8")
-            embeddings = json.loads(req_body)["data"]
-            file_name = json.loads(req_body)["name"]
+            embeddings = json.loads(req_body)["embeddings"]
+            name = json.loads(req_body)["name"]
             label = json.loads(req_body)["label"]
+            content = json.loads(req_body)["content"]
             result = ""
             if len(embeddings[0]) > 0:
-                result = upload_embeddings_to_zilliz_cloud(embeddings[0], str(file_name),label)
+                result = upload_embeddings_to_zilliz_cloud(
+                    embeddings[0], name, label, content
+                )
                 if result:
                     response_data = {
-                        "message": f"Embeddings for {file_name} uploaded to Zilliz Cloud.",
+                        "message": f"Embeddings for {name} uploaded to Zilliz Cloud.",
                     }
                     return func.HttpResponse(json.dumps(response_data), status_code=200)
                 else:
                     response_data = {
-                        "message": f"Failed to upload embeddings for {file_name} to Zilliz Cloud.",
+                        "message": f"Failed to upload embeddings for {name} to Zilliz Cloud.",
                     }
                     return func.HttpResponse(
                         json.dumps(response_data),
