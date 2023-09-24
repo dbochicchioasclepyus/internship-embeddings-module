@@ -7,13 +7,15 @@ from pymilvus import MilvusClient
 from sklearn.metrics.pairwise import cosine_similarity
 from dotenv import load_dotenv
 import json
+import os
+
 
 labels = ["EventContext", "SpeechContext", "Speaker"]
 versions = ["CONTEXT", "INTRO", "RAW SPEECH", "SUMMARY"]
-zilliz_cloud_endpoint = "https://in03-1e69e84772caa0e.api.gcp-us-west1.zillizcloud.com"
-zilliz_cloud_access_key = "e8f8abb09fb0f829958360a2c0ac69e0a88c16cdca0d90b22dc95af64b310c6f30f61187a2ce25e22c894195fb005848765ef3f0"
-zilliz_cloud_container_name = "embeddings"
-openai.api_key = "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"
+zilliz_cloud_endpoint = os.getenv("ZILLIZ_CLOUD_ENDPOINT")
+zilliz_cloud_access_key = os.getenv("ZILLIZ_CLOUD_ACCESS_KEY")
+zilliz_cloud_container_name = os.getenv("ZILLIZ_CLOUD_CONTAINER_NAME")
+openai.api_key = os.environ["OPENAI_API_KEY"]
 db_path = "queries.db"
 client = MilvusClient(uri=zilliz_cloud_endpoint, token=zilliz_cloud_access_key)
 
