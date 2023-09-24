@@ -1,96 +1,99 @@
-import sqlite3
-import os
-import openai
-import requests
 import azure.functions as func
+import sqlite3
+import openai
+import numpy as np
+import tensorflow as tf
+from pymilvus import MilvusClient
+from sklearn.metrics.pairwise import cosine_similarity
 from dotenv import load_dotenv
+import json
 
-# Configuration details
-load_dotenv()
-openai.api_key = os.environ["OPENAI_API_KEY"]
-ZILLIZ_CLOUD_ENDPOINT = os.environ["ZILLIZ_CLOUD_ENDPOINT"]
-ZILLIZ_CLOUD_ACCESS_KEY = os.environ["ZILLIZ_CLOUD_ACCESS_KEY"]
-ZILLIZ_CLOUD_CONTAINER_NAME = os.environ["ZILLIZ_CLOUD_CONTAINER_NAME"]
-DATABASE_NAME = "text_data.db"
+labels = ["EventContext", "SpeechContext", "Speaker"]
+versions = ["CONTEXT", "INTRO", "RAW SPEECH", "SUMMARY"]
+zilliz_cloud_endpoint = "https://in03-1e69e84772caa0e.api.gcp-us-west1.zillizcloud.com"
+zilliz_cloud_access_key = "e8f8abb09fb0f829958360a2c0ac69e0a88c16cdca0d90b22dc95af64b310c6f30f61187a2ce25e22c894195fb005848765ef3f0"
+zilliz_cloud_container_name = "embeddings"
+openai.api_key = "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"
+db_path = "queries.db"
+client = MilvusClient(uri=zilliz_cloud_endpoint, token=zilliz_cloud_access_key)
 
-# Database initialization
-def init_db():
-    with sqlite3.connect(DATABASE_NAME) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS generated_texts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                context TEXT,
-                intro TEXT,
-                raw_speech TEXT,
-                summary TEXT
-            )
-        ''')
-        conn.commit()
 
-init_db()
+def search(query, label):
+    embed = tf.saved_model.load(
+        "C:/Users/sanjay/Desktop/Sprint 2/aze/backend/HttpTrigger/Universal Sentence Encoder/"
+    )
+    query_embedding = embed([query]).numpy()[0]
+    res = client.query(
+        collection_name=zilliz_cloud_container_name,
+        filter=f'(Label == "{label}")',
+        output_fields=["Label", "vector"],
+    )
+    print(res)
+    vectors = [entry["vector"] for entry in res]
+    print(vectors)
+    similarities = cosine_similarity([query_embedding], vectors)
+    most_similar_index = np.argmax(similarities)
+    return res[most_similar_index]["Label"]
+
+
+def process_with_openai(text, version):
+    if version == "RAW SPEECH":
+        return text
+    elif version == "SUMMARY":
+        prompt = f"Summarize the following text:\n{text}"
+    elif version == "CONTEXT":
+        prompt = f"Provide a context for the following text:\n{text}"
+    else:  # Assuming INTRO as the default other option
+        prompt = f"Introduce the speaker for the following text:\n{text}"
+
+    response = openai.Completion.create(
+        engine="text-davinci-002", prompt=prompt, max_tokens=150
+    )
+    return response.choices[0].text.strip()
+
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    feedback = []
+    load_dotenv()
 
     try:
-        embeddings = get_embeddings_from_zilliz()
-        feedback.append("Successfully fetched embeddings from Zilliz Cloud.")
-        print(embeddings)
-    except ValueError as e:
-        return func.HttpResponse(str(e), status_code=500)
+        # Parse the JSON body
+        req_body = req.get_json()
+        user_query = req_body.get("user_query")
+        selected_label_index = int(req_body.get("selected_label_index"))
+        selected_label = labels[selected_label_index - 1]
+        version_index = int(req_body.get("version_index"))
+        version = versions[version_index - 1]
 
-    #transcript = req.get_json().get('transcript', '')
-    transcript = ""
+        # Replace user inputs with data from HTTP request
+        # user_query, selected_label, and version are now gotten from the request body
 
-    event_context = generate_text_from_embedding(embeddings["EventContext"], "Provide general details about the event")
-    feedback.append("Generated event context successfully.")
+        # Rest of your logic remains largely unchanged
+        answer_label = search(user_query, selected_label)
+        processed_text = process_with_openai(answer_label, version)
 
-    intro = generate_text_from_embedding(embeddings["Speaker"] + embeddings["SpeechContext"], "Provide a brief introduction about the speaker and the topic of their speech")
-    feedback.append("Generated speaker introduction successfully.")
-
-    raw_speech = extract_raw_speech_from_transcript(transcript) or generate_text_from_embedding(embeddings["SpeechContext"], "Generate a fictional speech based on the context")
-    feedback.append("Extracted/Generated raw speech successfully.")
-
-    summary = summarize_text(raw_speech)
-    feedback.append("Generated speech summary successfully.")
-
-    store_in_database(event_context, intro, raw_speech, summary)
-    feedback.append("Stored generated texts in database.")
-
-    return func.HttpResponse("\n".join(feedback), status_code=200)
-
-def get_embeddings_from_zilliz():
-    headers = {
-        "Authorization": f"Bearer {ZILLIZ_CLOUD_ACCESS_KEY}"
-    }
-    json_data = {
-    'collectionName': ZILLIZ_CLOUD_CONTAINER_NAME,
-    "id": "444018636918706219"
-}
-    
-    response = requests.post(f'{ZILLIZ_CLOUD_ENDPOINT}/v1/vector/get', headers=headers,json=json_data)
-    if response.status_code != 200:
-        raise ValueError("Failed to fetch embeddings from Zilliz cloud.")
-    
-    return response.json()
-
-def generate_text_from_embedding(embedding, prompt):
-    response = openai.Completion.create(engine="text-davinci-004", prompt=prompt, max_tokens=100)
-    return response.choices[0].text.strip()
-
-def extract_raw_speech_from_transcript(transcript):
-    return transcript
-
-def summarize_text(text):
-    response = openai.Completion.create(engine="text-davinci-004", prompt=f"Summarize the following speech: {text}", max_tokens=int(len(text)/2))
-    return response.choices[0].text.strip()
-
-def store_in_database(context, intro, raw_speech, summary):
-    with sqlite3.connect(DATABASE_NAME) as conn:
+        # Store in SQLite DB
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO generated_texts (context, intro, raw_speech, summary)
-            VALUES (?, ?, ?, ?)
-        ''', (context, intro, raw_speech, summary))
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS queries (
+            id INTEGER PRIMARY KEY,
+            query TEXT,
+            answer TEXT
+        )
+    """
+        )
+        cursor.execute(
+            "INSERT INTO queries (query, answer) VALUES (?, ?)",
+            (user_query, processed_text),
+        )
         conn.commit()
+        conn.close()
+
+        # Return the processed text as the response
+        return func.HttpResponse(
+            json.dumps({"processed_text": processed_text}), status_code=200
+        )
+
+    except Exception as e:
+        return func.HttpResponse("Error in processing request", status_code=500)
