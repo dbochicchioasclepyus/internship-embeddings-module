@@ -1,4 +1,4 @@
-import os, json
+import os, json, io
 import tensorflow as tf
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
@@ -10,6 +10,7 @@ from pymilvus import (
     DataType,
     Collection,
 )
+import pdfplumber
 
 load_dotenv()
 
@@ -34,7 +35,7 @@ def choose_blob_from_container():
     blobs = [
         blob
         for blob in container_client.list_blob_names()
-        if blob.split(".")[-1] in allowed_extensions
+        if blob.split(".")[1] in allowed_extensions
     ]
 
     return blobs
@@ -46,41 +47,56 @@ def generate_embeddings(file_content):
     folder = "HttpTrigger/Universal Sentence Encoder"
     path = os.path.join(os.getcwd(), folder)
     embed = tf.saved_model.load(path)
+
+    # Generate embeddings for the file content
+    print("Generating embeddings...")
     embeddings = embed([file_content])
 
     return embeddings
 
 
+def convert_pdf_to_text(pdf_bytes):
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        pdf_text = ""
+        for page in pdf.pages:
+            pdf_text += page.extract_text()
+    return pdf_text
+
+
 def generate_embeddings_by_files(file_content):
+    embed = []
     combined_text = ""
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
     container_client = blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
-
     for blob_name in file_content:
         blob_client = container_client.get_blob_client(blob_name)
         blob_data = blob_client.download_blob()
         if blob_name.split(".")[1] == "pdf":
-            content = str(blob_data.readall())
+            content = convert_pdf_to_text(blob_data.readall())
         else:
             content = blob_data.readall().decode("utf-8")
         combined_text += content
-
     print("Generating Embeddings...")
     embeddings = generate_embeddings(combined_text)
     print("Embeddings Generated Successfully")
 
-    return embeddings.numpy().tolist()
+    return embeddings.numpy().tolist(), combined_text
 
 
 # Function to upload embeddings to Zilliz Cloud (you may need to adjust this)
-def upload_embeddings_to_zilliz_cloud(embeddings, file_name,label):
+def upload_embeddings_to_zilliz_cloud(embeddings, file_name, label, content):
     client = MilvusClient(uri=zilliz_cloud_endpoint, token=zilliz_cloud_access_key)
 
     res = client.insert(
         collection_name=zilliz_cloud_container_name,
-        data={"name": file_name, "vector": embeddings,"Label":label},
+        data={
+            "name": file_name,
+            "vector": embeddings,
+            "label": label,
+            "content": content,
+        },
     )
-    print("Embeddings uploaded to zilliz succesfully!!",res)
+    print(res)
 
     return res
 
@@ -95,7 +111,8 @@ def create_zilliz_collection():
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
         FieldSchema(name="name", dtype=DataType.VARCHAR, max_length=512),
-        FieldSchema(name="Label", dtype=DataType.VARCHAR, max_length=512),
+        FieldSchema(name="label", dtype=DataType.VARCHAR, max_length=512),
+        FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=4096),
         FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=512),
     ]
     schema = CollectionSchema(fields, enable_dynamic_field=True)
