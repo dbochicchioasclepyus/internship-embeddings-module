@@ -1,0 +1,6 @@
+pymilvus==2.0.0
+openai==0.27.0
+cohere==0.1.5
+python-dotenv==0.19.1
+numpy==1.21.2
+scikit-learn==0.24.2
