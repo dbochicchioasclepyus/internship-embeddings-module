@@ -30,14 +30,11 @@ def choose_blob_from_container():
 
     # Define the allowed file extensions
     allowed_extensions = ["pdf", "txt", "json", "csv"]
-    # List all the blobs in the container with allowed extensions
-    blobs = [
+    return [
         blob
         for blob in container_client.list_blob_names()
         if blob.split(".")[-1] in allowed_extensions
     ]
-
-    return blobs
 
 
 # Function to generate embeddings (you may need to adjust this)
@@ -46,9 +43,7 @@ def generate_embeddings(file_content):
     folder = "HttpTrigger/Universal Sentence Encoder"
     path = os.path.join(os.getcwd(), folder)
     embed = tf.saved_model.load(path)
-    embeddings = embed([file_content])
-
-    return embeddings
+    return embed([file_content])
 
 
 def generate_embeddings_by_files(file_content):
