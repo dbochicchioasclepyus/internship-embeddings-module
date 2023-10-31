@@ -25,7 +25,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             print(request_data)
             return func.HttpResponse(json.dumps(response_data), status_code=200)
         except Exception as e:
-            print(str(e))
+            print(e)
             return func.HttpResponse(f"Error: {str(e)}", status_code=400)
     elif req.method == "POST" and route == "upload":
         try:
@@ -33,10 +33,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             embeddings = json.loads(req_body)["data"]
             file_name = json.loads(req_body)["name"]
             label = json.loads(req_body)["label"]
-            result = ""
             if len(embeddings[0]) > 0:
-                result = upload_embeddings_to_zilliz_cloud(embeddings[0], str(file_name),label)
-                if result:
+                result = ""
+                if result := upload_embeddings_to_zilliz_cloud(
+                    embeddings[0], str(file_name), label
+                ):
                     response_data = {
                         "message": f"Embeddings for {file_name} uploaded to Zilliz Cloud.",
                     }
@@ -51,11 +52,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     )
             else:
                 return func.HttpResponse(
-                    f"Warning: No embeddings in the request.",
-                    status_code=400,
+                    "Warning: No embeddings in the request.", status_code=400
                 )
         except Exception as e:
-            print(str(e))
+            print(e)
             return func.HttpResponse(f"Error: {str(e)}", status_code=400)
     else:
         return func.HttpResponse("Invalid action or HTTP method", status_code=400)
