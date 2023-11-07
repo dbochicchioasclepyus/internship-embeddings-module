@@ -75,7 +75,7 @@ def generate_qa_rag_model(topic, num_questions=10):
     questions = [q.split(".")[1].strip() if "." in q else q.strip() for q in questions]
     print("Questions generated.")
 
-    print(f"Generating an answer for each question...")
+    print("Generating an answer for each question...")
 
     for i in range(0, len(questions)):
         answer_prompt = f"Answer the question:\n{questions[i]}\n based on the following essay:\n{essay}\nAnswer:"
@@ -117,20 +117,18 @@ def retrieve_answers_from_zilliz(question, collection_name):
     ).embeddings[0]
     question_embedding = question_embedding / np.linalg.norm(question_embedding)
     search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
-    results = milvus.search(
+    if results := milvus.search(
         collection_name=collection_name,
         data=[
             [float(i) for i in question_embedding.tolist()]
         ],  # Ensure elements are floats
         params=search_params,
         top_k=1,
-    )
-
-    if results:
+    ):
         closest_id = results[0][0]["id"]
         closest_distance = results[0][0]["distance"]
         closest_answer = milvus.query(
-            collection_name, "id in [{}]".format(closest_id), ["answer"]
+            collection_name, f"id in [{closest_id}]", ["answer"]
         )[0]["answer"]
         return closest_answer, closest_distance
     else:
@@ -154,8 +152,7 @@ def get_similarity(target, candidates):
     sim = np.squeeze(sim).tolist()
     sort_index = np.argsort(sim)[::-1]
     sort_score = [sim[i] for i in sort_index]
-    similarity_scores = zip(sort_index, sort_score)
-    return similarity_scores
+    return zip(sort_index, sort_score)
 
 
 def normalize_vector(vector):
@@ -169,9 +166,7 @@ def normalize_vector(vector):
         List[float]: The normalized vector.
     """
     norm = np.linalg.norm(vector)
-    if norm == 0:
-        return vector  # Avoid division by zero
-    return vector / norm
+    return vector if norm == 0 else vector / norm
 
 
 # Function to store embeddings in Zilliz
