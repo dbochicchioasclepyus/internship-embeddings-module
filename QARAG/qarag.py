@@ -26,6 +26,7 @@ cohere_client = cohere.Client(cohere_api)
 openai.api_key = openai_api
 
 
+# Function to generate QA RAG model
 def generate_qa_rag_model(topic, num_questions=10):
     """
     Generate a Question-Answer RAG (Retrieval-Augmented Generation) model based on a given topic.
@@ -44,7 +45,7 @@ def generate_qa_rag_model(topic, num_questions=10):
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant in generating an essay that would help a 5 year old understand. You will not go too deep into the topic. You will provide me the surface level knowledge.",
+                "content": "You are a helpful assistant that has been tasked with generating a simple and straightforward essay suitable for a 5-year-old child. Provide only surface-level information and keep it engaging.",
             },
             {"role": "user", "content": essay_prompt},
         ],
@@ -65,7 +66,7 @@ def generate_qa_rag_model(topic, num_questions=10):
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant who generates questions without introduction or footer texts.",
+                "content": "You are a helpful assistant. Generate questions that a 5-year-old child might ask after reading the essay. These questions should be simple and direct.",
             },
             {"role": "user", "content": question_prompt},
         ],
@@ -83,7 +84,7 @@ def generate_qa_rag_model(topic, num_questions=10):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant who answers in not more than 2 or 3 lines.",
+                    "content": "You are a helpful assistant. Provide answers that are no longer than 2-3 lines and are easy for a 5-year-old to understand.",
                 },
                 {"role": "user", "content": answer_prompt},
             ],
@@ -98,6 +99,7 @@ def generate_qa_rag_model(topic, num_questions=10):
     return qa_pairs, questions
 
 
+# Function to retrieve closest answer from Zilliz based on similarity
 def retrieve_answers_from_zilliz(question, collection_name):
     """
     Retrieve answers from Zilliz based on the similarity to a given question.
@@ -117,7 +119,9 @@ def retrieve_answers_from_zilliz(question, collection_name):
     search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
     results = milvus.search(
         collection_name=collection_name,
-        data=[[float(i) for i in question_embedding.tolist()]],
+        data=[
+            [float(i) for i in question_embedding.tolist()]
+        ],  # Ensure elements are floats
         params=search_params,
         top_k=1,
     )
@@ -170,6 +174,7 @@ def normalize_vector(vector):
     return vector / norm
 
 
+# Function to store embeddings in Zilliz
 def store_embeddings_in_zilliz(qa_pairs, question_embeddings, collection_name):
     """
     Store question embeddings and answers in Zilliz.
@@ -185,7 +190,7 @@ def store_embeddings_in_zilliz(qa_pairs, question_embeddings, collection_name):
     milvus = MilvusClient(uri=zilliz_cloud_endpoint, token=zilliz_cloud_access_key)
     entities = []
     max_distance_for_exact_match = 0
-    min_distance_for_barely_match = float("inf")
+    min_distance_for_barely_match = float("inf")  # Initialize to high value
 
     for qa_pair, embedding in zip(qa_pairs, question_embeddings.embeddings):
         question, answer = qa_pair
@@ -212,6 +217,7 @@ def store_embeddings_in_zilliz(qa_pairs, question_embeddings, collection_name):
             min_distance_for_barely_match = closest_distance
 
     return max_distance_for_exact_match, min_distance_for_barely_match
+    # Function to get similarity
 
 
 def distance_to_similarity(distance):
@@ -240,29 +246,36 @@ if __name__ == "__main__":
     print(f"Max distance for exact match: {max_distance_for_exact_match}")
     print(f"Min distance for barely match: {min_distance_for_barely_match}")
 
+    # Convert distance to similarity score
     min_similarity_threshold = 1 / (1 + max_distance_for_exact_match)
     max_similarity_threshold = 1 / (1 + min_distance_for_barely_match)
 
-    user_question = input("Enter a question: ")
-    closest_answer, closest_distance = retrieve_answers_from_zilliz(
-        user_question, zilliz_cloud_container_name
-    )
+    while True:  # Loop for continuous questioning
+        user_question = input("Enter a question: ")
+        closest_answer, closest_distance = retrieve_answers_from_zilliz(
+            user_question, zilliz_cloud_container_name
+        )
 
-    if closest_distance is not None:
-        closest_similarity = 1 / (1 + closest_distance)
+        if closest_distance is not None:
+            closest_similarity = 1 / (1 + closest_distance)
+            percentage_match = closest_similarity * 100  # Convert to percentage
 
-        if (
-            min_distance_for_barely_match
-            <= closest_distance
-            <= max_distance_for_exact_match
-            and min_similarity_threshold
-            <= closest_similarity
-            <= max_similarity_threshold
-        ):
-            print(
-                f"Closest answer found: {closest_answer} (Distance: {closest_distance}, Similarity: {closest_similarity})"
-            )
+            if (
+                min_distance_for_barely_match
+                <= closest_distance
+                <= max_distance_for_exact_match
+                and min_similarity_threshold
+                <= closest_similarity
+                <= max_similarity_threshold
+            ):
+                print(
+                    f"Closest answer found: {closest_answer}\nDistance: {closest_distance}\nPercentage Match: {percentage_match}%"
+                )
+            else:
+                print("Question out of range or out of topic.")
         else:
-            print("Question out of range or out of topic.")
-    else:
-        print("No close match found.")
+            print("No close match found.")
+
+        continue_asking = input("Do you want to ask another question? (y/n): ")
+        if continue_asking.lower() != "y":
+            break
